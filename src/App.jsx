@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 
 const MONTHS = ["Leden","Unor","Brezen","Duben","Kveten","Cerven","Cervenec","Srpen","Zari","Rijen","Listopad","Prosinec"];
 const today = new Date();
@@ -43,40 +43,13 @@ function KpiCard({ label, value, sub, color, icon }) {
   );
 }
 
-function makeSampleDays() {
-  const out = {};
-  const m = today.getMonth(), y = today.getFullYear();
-  for (let d = 1; d <= today.getDate(); d++) {
-    const date = y + "-" + String(m+1).padStart(2,"0") + "-" + String(d).padStart(2,"0");
-    out[date] = {
-      ads: Math.round((600+Math.random()*1000)*10)/10,
-      sales: Math.floor(5+Math.random()*20),
-      revenue: Math.round((1200+Math.random()*2400)*10)/10,
-    };
-  }
-  return out;
-}
-
-function makeProductDays(mult) {
-  const out = {};
-  const m = today.getMonth(), y = today.getFullYear();
-  for (let d = 1; d <= today.getDate(); d++) {
-    const date = y + "-" + String(m+1).padStart(2,"0") + "-" + String(d).padStart(2,"0");
-    const ads = Math.round((300+Math.random()*600)*mult*10)/10;
-    const roas = (1.2+Math.random()*1.2)*mult;
-    out[date] = { ads, sales: Math.floor((3+Math.random()*12)*mult), revenue: Math.round(ads*roas*10)/10 };
-  }
-  return out;
-}
-
 const INIT_PRODUCTS = [
   { id:1, name:"Produkt A", color:"#818cf8" },
   { id:2, name:"Produkt B", color:"#34d399" },
   { id:3, name:"Produkt C", color:"#f87171" },
 ];
-const INIT_PDATA = { 1: makeProductDays(1.2), 2: makeProductDays(0.8), 3: makeProductDays(0.5) };
 
-const BILLING_CYCLES = ["Mesicne","Rocne","Ctvrtletne","Jednorzove"].map(s => s.normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+const BILLING_CYCLES = ["Mesicne","Rocne","Ctvrtletne","Jednorzove"].map(s => s.replace(/[^\x00-\x7F]/g, ""));
 const SUB_CATEGORIES = ["E-commerce","Reklama","Design","Analytics","Logistika","Komunikace","Ostatni"];
 const INIT_SUBS = [
   { id:1, name:"Shopify", category:"E-commerce", price:1800, currency:"CZK", cycle:"Mesicne", active:true, note:"Prostredni plan", color:"#34d399" },
@@ -86,9 +59,11 @@ const INIT_SUBS = [
 
 export default function App() {
   const [tab, setTab] = useState("overview");
-  const [records, setRecords] = useState(makeSampleDays);
+  const [records, setRecords] = useState({});
+  const [shopifyLoading, setShopifyLoading] = useState(false);
+  const [shopifyError, setShopifyError] = useState(null);
   const [products, setProducts] = useState(INIT_PRODUCTS);
-  const [pData, setPData] = useState(INIT_PDATA);
+  const [pData, setPData] = useState({1:{},2:{},3:{}});
   const [selMonth, setSelMonth] = useState(today.getMonth());
   const [selYear] = useState(today.getFullYear());
   const [editDate, setEditDate] = useState(todayStr);
@@ -100,6 +75,37 @@ export default function App() {
   const [showSubForm, setShowSubForm] = useState(false);
   const [editSub, setEditSub] = useState(null);
   const [subForm, setSubForm] = useState({ name:"", category:"E-commerce", price:"", currency:"CZK", cycle:"Mesicne", active:true, note:"", color:"#818cf8" });
+
+  useEffect(() => {
+    async function fetchShopify() {
+      setShopifyLoading(true);
+      setShopifyError(null);
+      try {
+        const from = selYear + "-" + String(selMonth+1).padStart(2,"0") + "-01";
+        const lastDay = new Date(selYear, selMonth+1, 0).getDate();
+        const to = selYear + "-" + String(selMonth+1).padStart(2,"0") + "-" + lastDay;
+        const res = await fetch("/api/shopify?from=" + from + "T00:00:00Z&to=" + to + "T23:59:59Z");
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        setRecords(prev => {
+          const updated = {...prev};
+          Object.entries(data).forEach(([date, d]) => {
+            updated[date] = {
+              ads: prev[date]?.ads || 0,
+              sales: d.sales,
+              revenue: Math.round(d.revenue),
+            };
+          });
+          return updated;
+        });
+      } catch (err) {
+        setShopifyError("Shopify: " + err.message);
+      } finally {
+        setShopifyLoading(false);
+      }
+    }
+    fetchShopify();
+  }, [selMonth, selYear]);
 
   const monthDays = useMemo(() => {
     const n = new Date(selYear, selMonth+1, 0).getDate();
@@ -228,6 +234,9 @@ export default function App() {
         </div>
       </div>
 
+      {shopifyLoading && <div style={{ background:"#1a1535", padding:"8px 24px", fontSize:"11px", color:"#a5b4fc" }}>Nacitam data ze Shopify...</div>}
+      {shopifyError && <div style={{ background:"#1f0606", padding:"8px 24px", fontSize:"11px", color:"#f87171" }}>{shopifyError}</div>}
+
       <div style={S.tabBar}>
         {TABS.map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)} style={{ padding:"14px 16px", background:"none", border:"none", whiteSpace:"nowrap", borderBottom: tab===id ? "2px solid #818cf8" : "2px solid transparent", color: tab===id ? "#c4b5fd" : clr.muted, fontSize:"12px", cursor:"pointer", fontFamily:"monospace", letterSpacing:"1px", transition:"all .2s" }}>{label}</button>
@@ -261,8 +270,8 @@ export default function App() {
                 ))}
               </div>
               <div style={{ display:"flex", gap:"16px", marginTop:"10px", fontSize:"10px", color:clr.muted }}>
-                <span style={{ color:clr.win }}>* Trzby</span>
-                <span style={{ color:clr.lose }}>* Reklama</span>
+                <span style={{ color:clr.win }}>* Trzby (Shopify)</span>
+                <span style={{ color:clr.lose }}>* Reklama (rucne)</span>
               </div>
             </div>
           </div>
@@ -461,12 +470,17 @@ export default function App() {
             <div style={{ background:"#12111e", border:"1px solid #2a2540", borderRadius:"12px", padding:"24px" }}>
               <div style={{ fontSize:"11px", color:"#6b5fa0", letterSpacing:"3px", textTransform:"uppercase", marginBottom:"20px" }}>Zapis dne</div>
               <div style={{ marginBottom:"14px" }}><label style={S.label}>Datum</label><input type="date" value={editDate} onChange={e => { setEditDate(e.target.value); const r=records[e.target.value]; setForm(r?{ads:String(r.ads),sales:String(r.sales),revenue:String(r.revenue)}:{ads:"",sales:"",revenue:""}); }} style={S.input} /></div>
-              {[["ads","Utrata za reklamu (Kc)","1200"],["sales","Pocet objednavek","12"],["revenue","Celkove trzby (Kc)","3600"]].map(([k,lbl,ph]) => (
+              <div style={{ marginBottom:"14px", padding:"10px", background:"#0f0e1a", borderRadius:"8px", fontSize:"11px", color:"#6b5fa0" }}>Trzby a objednavky se nacitaji automaticky ze Shopify. Zde zadej pouze reklamu.</div>
+              {[["ads","Utrata za reklamu (Kc)","1200"]].map(([k,lbl,ph]) => (
                 <div key={k} style={{ marginBottom:"14px" }}><label style={S.label}>{lbl}</label><input type="number" placeholder={"napr. "+ph} value={form[k]} onChange={e => setForm(f => ({...f,[k]:e.target.value}))} style={S.input} /></div>
               ))}
-              {(form.ads||form.revenue) && (() => {
-                const a=parseFloat(form.ads)||0, r=parseFloat(form.revenue)||0, s=parseInt(form.sales)||0;
-                const roas=a>0?r/a:null; const profit=r-a; const st=roasStatus(roas);
+              {form.ads && (() => {
+                const a=parseFloat(form.ads)||0;
+                const r=records[editDate];
+                const revenue=r?r.revenue:0;
+                const roas=a>0?revenue/a:null;
+                const profit=revenue-a;
+                const st=roasStatus(roas);
                 return (
                   <div style={{ background:"#0f0e1a", border:"1px solid #2a2540", borderRadius:"8px", padding:"14px", marginBottom:"18px" }}>
                     <div style={{ fontSize:"10px", color:"#6b5fa0", letterSpacing:"2px", marginBottom:"10px" }}>AUTOMATICKY VYPOCET</div>
@@ -474,7 +488,6 @@ export default function App() {
                       ["Zisk", fmtK(profit), profit>=0?clr.purple:clr.lose],
                       ["ROAS", roas?roas.toFixed(2)+"x":"-", roas>=WINNING_ROAS?clr.win:roas>=1?clr.eq:clr.lose],
                       ["ROI", a>0?((profit/a)*100).toFixed(1)+"%":"-", "#fbbf24"],
-                      ["Cena/obj.", s>0&&a>0?fmtK(a/s):"-", "#a5b4fc"],
                     ].map(([label,val,color]) => (
                       <div key={label} style={{ display:"flex", justifyContent:"space-between", marginBottom:"6px" }}>
                         <span style={{ fontSize:"11px", color:clr.muted }}>{label}</span>
@@ -486,7 +499,7 @@ export default function App() {
                 );
               })()}
               <button onClick={handleSave} style={{ width:"100%", padding:"14px", background:saved?"linear-gradient(135deg,#065f46,#047857)":"linear-gradient(135deg,#3730a3,#4f46e5)", border:"none", borderRadius:"8px", color:"#fff", fontSize:"14px", fontWeight:"700", cursor:"pointer", fontFamily:"monospace", letterSpacing:"1px", transition:"all .3s" }}>
-                {saved ? "Ulozeno!" : "Ulozit zaznam"}
+                {saved ? "Ulozeno!" : "Ulozit reklamu"}
               </button>
             </div>
           </div>
