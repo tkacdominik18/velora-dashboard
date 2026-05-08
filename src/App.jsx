@@ -7,7 +7,7 @@ const WINNING_ROAS = 1.8;
 
 const fmt = (n) => Number(n).toLocaleString("cs-CZ", { maximumFractionDigits: 0 });
 const fmtK = (n) => fmt(n) + " Kc";
-const clr = { win:"#34d399", lose:"#f87171", eq:"#fbbf24", purple:"#818cf8", muted:"#6b6880", dim:"#2a2540" };
+const clr = { win:"#34d399", lose:"#f87171", eq:"#fbbf24", purple:"#818cf8", muted:"#6b6880" };
 
 function roasStatus(roas) {
   if (roas === null || roas === undefined) return null;
@@ -25,16 +25,12 @@ const STATUS_CFG = {
 function Badge({ status }) {
   if (!status) return null;
   const c = STATUS_CFG[status];
-  return (
-    <span style={{ fontSize:"10px", fontWeight:"700", letterSpacing:"1.5px", color:c.color, background:c.bg, padding:"3px 8px", borderRadius:"4px", border:"1px solid " + c.color + "44" }}>
-      {c.label}
-    </span>
-  );
+  return <span style={{ fontSize:"10px", fontWeight:"700", color:c.color, background:c.bg, padding:"3px 8px", borderRadius:"4px", border:"1px solid "+c.color+"44" }}>{c.label}</span>;
 }
 
 function KpiCard({ label, value, sub, color, icon }) {
   return (
-    <div style={{ background:"linear-gradient(135deg,#12111e,#1a1830)", border:"1px solid #2a2540", borderRadius:"12px", padding:"16px", position:"relative", overflow:"hidden" }}>
+    <div style={{ background:"linear-gradient(135deg,#12111e,#1a1830)", border:"1px solid #2a2540", borderRadius:"12px", padding:"16px", position:"relative" }}>
       <div style={{ position:"absolute", top:"12px", right:"14px", fontSize:"20px", opacity:.35 }}>{icon}</div>
       <div style={{ fontSize:"10px", color:clr.muted, letterSpacing:"2px", textTransform:"uppercase", marginBottom:"8px" }}>{label}</div>
       <div style={{ fontSize:"20px", fontWeight:"700", color, marginBottom:"4px" }}>{value}</div>
@@ -57,17 +53,32 @@ const INIT_SUBS = [
   { id:3, name:"Canva Pro", category:"Design", price:300, currency:"CZK", cycle:"Mesicne", active:true, note:"Grafika", color:"#f472b6" },
 ];
 
+function parseOrders(json, month, year) {
+  const records = {};
+  try {
+    const edges = json.orders?.edges || [];
+    edges.forEach(({ node }) => {
+      const date = node.createdAt.split("T")[0];
+      const d = new Date(date);
+      if (d.getMonth() !== month || d.getFullYear() !== year) return;
+      if (!records[date]) records[date] = { ads:0, sales:0, revenue:0 };
+      records[date].sales += 1;
+      records[date].revenue += Math.round(parseFloat(node.totalPrice)||0);
+    });
+  } catch(e) {}
+  return records;
+}
+
 export default function App() {
   const [tab, setTab] = useState("overview");
-  const [records, setRecords] = useState({});
-  const [shopifyLoading, setShopifyLoading] = useState(false);
-  const [shopifyError, setShopifyError] = useState(null);
+  const [shopifyData, setShopifyData] = useState(null);
+  const [adsData, setAdsData] = useState({});
   const [products, setProducts] = useState(INIT_PRODUCTS);
   const [pData, setPData] = useState({1:{},2:{},3:{}});
   const [selMonth, setSelMonth] = useState(today.getMonth());
   const [selYear] = useState(today.getFullYear());
   const [editDate, setEditDate] = useState(todayStr);
-  const [form, setForm] = useState({ ads:"", sales:"", revenue:"" });
+  const [form, setForm] = useState({ ads:"" });
   const [saved, setSaved] = useState(false);
   const [newProd, setNewProd] = useState("");
   const [editProd, setEditProd] = useState(null);
@@ -77,35 +88,26 @@ export default function App() {
   const [subForm, setSubForm] = useState({ name:"", category:"E-commerce", price:"", currency:"CZK", cycle:"Mesicne", active:true, note:"", color:"#818cf8" });
 
   useEffect(() => {
-    async function fetchShopify() {
-      setShopifyLoading(true);
-      setShopifyError(null);
-      try {
-        const from = selYear + "-" + String(selMonth+1).padStart(2,"0") + "-01";
-        const lastDay = new Date(selYear, selMonth+1, 0).getDate();
-        const to = selYear + "-" + String(selMonth+1).padStart(2,"0") + "-" + lastDay;
-        const res = await fetch("/api/shopify?from=" + from + "T00:00:00Z&to=" + to + "T23:59:59Z");
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        setRecords(prev => {
-          const updated = {...prev};
-          Object.entries(data).forEach(([date, d]) => {
-            updated[date] = {
-              ads: prev[date]?.ads || 0,
-              sales: d.sales,
-              revenue: Math.round(d.revenue),
-            };
-          });
-          return updated;
-        });
-      } catch (err) {
-        setShopifyError("Shopify: " + err.message);
-      } finally {
-        setShopifyLoading(false);
-      }
-    }
-    fetchShopify();
-  }, [selMonth, selYear]);
+    fetch("/orders.json")
+      .then(r => r.json())
+      .then(data => setShopifyData(data))
+      .catch(() => {});
+  }, []);
+
+  const records = useMemo(() => {
+    if (!shopifyData) return adsData;
+    const shopify = parseOrders(shopifyData, selMonth, selYear);
+    const merged = {};
+    const allDates = new Set([...Object.keys(shopify), ...Object.keys(adsData)]);
+    allDates.forEach(date => {
+      merged[date] = {
+        ads: adsData[date]?.ads || 0,
+        sales: shopify[date]?.sales || 0,
+        revenue: shopify[date]?.revenue || 0,
+      };
+    });
+    return merged;
+  }, [shopifyData, adsData, selMonth, selYear]);
 
   const monthDays = useMemo(() => {
     const n = new Date(selYear, selMonth+1, 0).getDate();
@@ -119,7 +121,7 @@ export default function App() {
     let ads=0, sales=0, revenue=0, days=0;
     monthDays.forEach(date => {
       const r = records[date];
-      if (r) { ads+=r.ads||0; sales+=r.sales||0; revenue+=r.revenue||0; days++; }
+      if (r && (r.sales>0 || r.ads>0)) { ads+=r.ads||0; sales+=r.sales||0; revenue+=r.revenue||0; days++; }
     });
     const profit = revenue-ads;
     const roas = ads>0 ? revenue/ads : 0;
@@ -159,15 +161,16 @@ export default function App() {
   }, [subs]);
 
   function handleSave() {
-    setRecords(prev => ({ ...prev, [editDate]: { ads: parseFloat(form.ads)||0, sales: parseInt(form.sales)||0, revenue: parseFloat(form.revenue)||0 }}));
+    const ads = parseFloat(form.ads)||0;
+    setAdsData(prev => ({ ...prev, [editDate]: { ads, sales: records[editDate]?.sales||0, revenue: records[editDate]?.revenue||0 }}));
     setSaved(true); setTimeout(() => setSaved(false), 2000);
-    setForm({ ads:"", sales:"", revenue:"" });
+    setForm({ ads:"" });
   }
 
   function loadDay(date) {
     setEditDate(date);
-    const r = records[date];
-    setForm(r ? { ads:String(r.ads), sales:String(r.sales), revenue:String(r.revenue) } : { ads:"", sales:"", revenue:"" });
+    const r = adsData[date];
+    setForm({ ads: r ? String(r.ads) : "" });
     setTab("entry");
   }
 
@@ -203,7 +206,7 @@ export default function App() {
   function deleteSub(id) { setSubs(prev => prev.filter(s => s.id !== id)); }
   function toggleSub(id) { setSubs(prev => prev.map(s => s.id===id ? {...s, active:!s.active} : s)); }
 
-  const TABS = [["overview","Prehled"],["products","Produkty"],["subs","Predplatne"],["table","Tabulka"],["entry","Zapis"]];
+  const TABS = [["overview","Prehled"],["products","Produkty"],["subs","Predplatne"],["table","Tabulka"],["entry","Zapis reklamy"]];
 
   const S = {
     page: { minHeight:"100vh", background:"#0a0a0f", fontFamily:"monospace", color:"#e8e4d9" },
@@ -214,10 +217,10 @@ export default function App() {
     cardTitle: { fontSize:"10px", color:"#6b5fa0", letterSpacing:"3px", textTransform:"uppercase", marginBottom:"16px" },
     label: { display:"block", fontSize:"10px", color:"#6b5fa0", letterSpacing:"2px", textTransform:"uppercase", marginBottom:"7px" },
     input: { width:"100%", background:"#0f0e1a", border:"1px solid #2a2540", borderRadius:"8px", padding:"11px 14px", color:"#e8e4d9", fontSize:"14px", fontFamily:"monospace", outline:"none", boxSizing:"border-box" },
-    btnPrimary: { padding:"11px 18px", background:"linear-gradient(135deg,#3730a3,#4f46e5)", border:"none", borderRadius:"8px", color:"#fff", fontSize:"13px", fontWeight:"700", cursor:"pointer", fontFamily:"monospace", letterSpacing:"1px" },
+    btnPrimary: { padding:"11px 18px", background:"linear-gradient(135deg,#3730a3,#4f46e5)", border:"none", borderRadius:"8px", color:"#fff", fontSize:"13px", fontWeight:"700", cursor:"pointer", fontFamily:"monospace" },
     btnSecondary: { padding:"11px 18px", background:"#1a1830", border:"1px solid #2a2540", borderRadius:"8px", color:"#c4b5fd", fontSize:"13px", cursor:"pointer", fontFamily:"monospace" },
-    arrowBtn: { background:"#1a1830", border:"1px solid #2a2540", color:"#c4b5fd", width:"32px", height:"32px", borderRadius:"6px", cursor:"pointer", fontSize:"18px", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"monospace" },
-    iconBtn: { background:"none", border:"none", cursor:"pointer", fontSize:"14px", padding:"4px", fontFamily:"monospace", color:clr.muted },
+    arrowBtn: { background:"#1a1830", border:"1px solid #2a2540", color:"#c4b5fd", width:"32px", height:"32px", borderRadius:"6px", cursor:"pointer", fontSize:"18px", display:"flex", alignItems:"center", justifyContent:"center" },
+    iconBtn: { background:"none", border:"none", cursor:"pointer", fontSize:"14px", padding:"4px", color:clr.muted },
   };
 
   return (
@@ -234,12 +237,12 @@ export default function App() {
         </div>
       </div>
 
-      {shopifyLoading && <div style={{ background:"#1a1535", padding:"8px 24px", fontSize:"11px", color:"#a5b4fc" }}>Nacitam data ze Shopify...</div>}
-      {shopifyError && <div style={{ background:"#1f0606", padding:"8px 24px", fontSize:"11px", color:"#f87171" }}>{shopifyError}</div>}
+      {shopifyData && <div style={{ background:"#052e16", padding:"6px 24px", fontSize:"11px", color:"#34d399" }}>Shopify data nactena!</div>}
+      {!shopifyData && <div style={{ background:"#1a1535", padding:"6px 24px", fontSize:"11px", color:"#a5b4fc" }}>Nacitam Shopify data...</div>}
 
       <div style={S.tabBar}>
         {TABS.map(([id,label]) => (
-          <button key={id} onClick={() => setTab(id)} style={{ padding:"14px 16px", background:"none", border:"none", whiteSpace:"nowrap", borderBottom: tab===id ? "2px solid #818cf8" : "2px solid transparent", color: tab===id ? "#c4b5fd" : clr.muted, fontSize:"12px", cursor:"pointer", fontFamily:"monospace", letterSpacing:"1px", transition:"all .2s" }}>{label}</button>
+          <button key={id} onClick={() => setTab(id)} style={{ padding:"14px 16px", background:"none", border:"none", whiteSpace:"nowrap", borderBottom: tab===id ? "2px solid #818cf8" : "2px solid transparent", color: tab===id ? "#c4b5fd" : clr.muted, fontSize:"12px", cursor:"pointer", fontFamily:"monospace", letterSpacing:"1px" }}>{label}</button>
         ))}
       </div>
 
@@ -249,11 +252,11 @@ export default function App() {
           <div>
             <div style={{ marginBottom:"18px", display:"flex", alignItems:"center", gap:"12px", flexWrap:"wrap" }}>
               <Badge status={roasStatus(stats.roas)} />
-              <span style={{ fontSize:"12px", color:clr.muted }}>Celkovy ROAS: <strong style={{ color:"#fbbf24" }}>{stats.roas.toFixed(2)}x</strong> (winning &gt;= {WINNING_ROAS}x)</span>
+              <span style={{ fontSize:"12px", color:clr.muted }}>ROAS: <strong style={{ color:"#fbbf24" }}>{stats.roas.toFixed(2)}x</strong> (winning &gt;= {WINNING_ROAS}x)</span>
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:"12px", marginBottom:"24px" }}>
               <KpiCard label="Utrata reklama" value={fmtK(stats.ads)} icon="$" color={clr.lose} sub={stats.days + " dni"} />
-              <KpiCard label="Celkove trzby" value={fmtK(stats.revenue)} icon="+" color={clr.win} sub={fmt(stats.sales) + " obj."} />
+              <KpiCard label="Trzby (Shopify)" value={fmtK(stats.revenue)} icon="+" color={clr.win} sub={fmt(stats.sales) + " obj."} />
               <KpiCard label="Cisty zisk" value={fmtK(stats.profit)} icon="=" color={stats.profit>=0?clr.purple:clr.lose} sub={stats.profit>=0?"V zisku":"Ztrata"} />
               <KpiCard label="ROAS" value={stats.roas.toFixed(2)+"x"} icon="%" color={clr.eq} sub={"ROI " + stats.roi.toFixed(1) + "%"} />
             </div>
@@ -261,7 +264,7 @@ export default function App() {
               <div style={S.cardTitle}>Denni vyvoj - {MONTHS[selMonth]}</div>
               <div style={{ display:"flex", alignItems:"flex-end", gap:"3px", height:"110px" }}>
                 {chartData.map((d,i) => (
-                  <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", height:"100%" }}>
+                  <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", height:"100%" }}>
                     <div style={{ width:"100%", display:"flex", flexDirection:"column", justifyContent:"flex-end", height:"100%", gap:"1px" }}>
                       <div style={{ width:"100%", background:clr.win, height:(d.revenue/maxVal*100)+"%", borderRadius:"2px 2px 0 0", opacity:.85 }} />
                       <div style={{ width:"100%", background:clr.lose, height:(d.ads/maxVal*100)+"%", borderRadius:"2px 2px 0 0", opacity:.7 }} />
@@ -270,8 +273,8 @@ export default function App() {
                 ))}
               </div>
               <div style={{ display:"flex", gap:"16px", marginTop:"10px", fontSize:"10px", color:clr.muted }}>
-                <span style={{ color:clr.win }}>* Trzby (Shopify)</span>
-                <span style={{ color:clr.lose }}>* Reklama (rucne)</span>
+                <span style={{ color:clr.win }}>* Trzby</span>
+                <span style={{ color:clr.lose }}>* Reklama</span>
               </div>
             </div>
           </div>
@@ -287,7 +290,7 @@ export default function App() {
               {prodStats.map(p => {
                 const bc = p.status ? STATUS_CFG[p.status] : null;
                 return (
-                  <div key={p.id} style={{ background:"#12111e", border:"1px solid " + (bc ? bc.color+"44" : "#2a2540"), borderRadius:"14px", padding:"20px" }}>
+                  <div key={p.id} style={{ background:"#12111e", border:"1px solid "+(bc?bc.color+"44":"#2a2540"), borderRadius:"14px", padding:"20px" }}>
                     <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"12px" }}>
                       <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
                         <div style={{ width:"10px", height:"10px", borderRadius:"50%", background:p.color }} />
@@ -296,13 +299,7 @@ export default function App() {
                       <button onClick={() => removeProduct(p.id)} style={{ background:"none", border:"none", color:"#4b4860", cursor:"pointer", fontSize:"18px" }}>x</button>
                     </div>
                     {p.status && <div style={{ marginBottom:"14px" }}><Badge status={p.status} /></div>}
-                    {[
-                      ["ROAS", p.roas!==null ? p.roas.toFixed(2)+"x" : "-", p.roas!==null?(p.roas>=WINNING_ROAS?clr.win:p.roas>=1?clr.eq:clr.lose):"#4b4860"],
-                      ["Trzby", fmtK(p.revenue), clr.win],
-                      ["Reklama", fmtK(p.ads), clr.lose],
-                      ["Zisk", fmtK(p.profit), p.profit>=0?clr.purple:clr.lose],
-                      ["Objednavky", String(p.sales), "#e8e4d9"],
-                    ].map(([label,val,color]) => (
+                    {[["ROAS",p.roas!==null?p.roas.toFixed(2)+"x":"-",p.roas!==null?(p.roas>=WINNING_ROAS?clr.win:p.roas>=1?clr.eq:clr.lose):"#4b4860"],["Trzby",fmtK(p.revenue),clr.win],["Reklama",fmtK(p.ads),clr.lose],["Zisk",fmtK(p.profit),p.profit>=0?clr.purple:clr.lose],["Objednavky",String(p.sales),"#e8e4d9"]].map(([label,val,color]) => (
                       <div key={label} style={{ display:"flex", justifyContent:"space-between", marginBottom:"7px" }}>
                         <span style={{ fontSize:"11px", color:clr.muted }}>{label}</span>
                         <span style={{ fontSize:"13px", fontWeight:"700", color }}>{val}</span>
@@ -310,11 +307,9 @@ export default function App() {
                     ))}
                     {p.roas !== null && (
                       <div style={{ marginTop:"14px" }}>
-                        <div style={{ display:"flex", justifyContent:"space-between", fontSize:"10px", color:clr.muted, marginBottom:"5px" }}>
-                          <span>ROAS progress</span><span>cil {WINNING_ROAS}x</span>
-                        </div>
+                        <div style={{ display:"flex", justifyContent:"space-between", fontSize:"10px", color:clr.muted, marginBottom:"5px" }}><span>ROAS progress</span><span>cil {WINNING_ROAS}x</span></div>
                         <div style={{ background:"#1a1830", borderRadius:"4px", height:"6px", overflow:"hidden" }}>
-                          <div style={{ width: Math.min((p.roas/WINNING_ROAS)*100,100)+"%", height:"100%", background: p.roas>=WINNING_ROAS?clr.win:p.roas>=1?clr.eq:clr.lose, borderRadius:"4px" }} />
+                          <div style={{ width:Math.min((p.roas/WINNING_ROAS)*100,100)+"%", height:"100%", background:p.roas>=WINNING_ROAS?clr.win:p.roas>=1?clr.eq:clr.lose, borderRadius:"4px" }} />
                         </div>
                       </div>
                     )}
@@ -353,7 +348,7 @@ export default function App() {
             </div>
             <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
               {subs.map(s => (
-                <div key={s.id} style={{ background:"#12111e", border:"1px solid " + (s.active?"#2a2540":"#1a1828"), borderRadius:"12px", padding:"16px", display:"flex", alignItems:"center", gap:"12px", opacity:s.active?1:0.55 }}>
+                <div key={s.id} style={{ background:"#12111e", border:"1px solid "+(s.active?"#2a2540":"#1a1828"), borderRadius:"12px", padding:"16px", display:"flex", alignItems:"center", gap:"12px", opacity:s.active?1:0.55 }}>
                   <div style={{ width:"10px", height:"10px", borderRadius:"50%", background:s.color, flexShrink:0 }} />
                   <div style={{ flex:1 }}>
                     <div style={{ display:"flex", alignItems:"center", gap:"8px", marginBottom:"4px", flexWrap:"wrap" }}>
@@ -362,9 +357,8 @@ export default function App() {
                       <span style={{ fontSize:"9px", color:s.active?clr.win:clr.muted }}>{s.active?"Aktivni":"Neaktivni"}</span>
                     </div>
                     {s.note && <div style={{ fontSize:"11px", color:"#4b4860" }}>{s.note}</div>}
-                    <div style={{ fontSize:"11px", color:clr.muted }}>{s.cycle}</div>
                   </div>
-                  <div style={{ textAlign:"right", flexShrink:0 }}>
+                  <div style={{ textAlign:"right" }}>
                     <div style={{ fontSize:"18px", fontWeight:"700", color:"#fb923c" }}>{fmtK(s.price)}</div>
                   </div>
                   <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
@@ -376,9 +370,9 @@ export default function App() {
               ))}
             </div>
             {showSubForm && (
-              <div style={{ position:"fixed", inset:0, background:"#000000bb", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px", overflowY:"auto" }}>
-                <div style={{ background:"#12111e", border:"1px solid #2a2540", borderRadius:"14px", padding:"24px", width:"100%", maxWidth:"440px", margin:"auto" }}>
-                  <div style={{ fontSize:"11px", color:"#6b5fa0", letterSpacing:"2px", marginBottom:"20px", textTransform:"uppercase" }}>{editSub ? "Upravit" : "Nove predplatne"}</div>
+              <div style={{ position:"fixed", inset:0, background:"#000000bb", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
+                <div style={{ background:"#12111e", border:"1px solid #2a2540", borderRadius:"14px", padding:"24px", width:"100%", maxWidth:"440px" }}>
+                  <div style={{ fontSize:"11px", color:"#6b5fa0", letterSpacing:"2px", marginBottom:"20px", textTransform:"uppercase" }}>{editSub?"Upravit":"Nove predplatne"}</div>
                   {[["name","Nazev","Shopify..."],["note","Poznamka",""]].map(([k,lbl,ph]) => (
                     <div key={k} style={{ marginBottom:"14px" }}><label style={S.label}>{lbl}</label><input placeholder={ph} value={subForm[k]} onChange={e => setSubForm(f => ({...f,[k]:e.target.value}))} style={S.input} /></div>
                   ))}
@@ -389,24 +383,6 @@ export default function App() {
                         {["CZK","EUR","USD","GBP"].map(c => <option key={c}>{c}</option>)}
                       </select>
                     </div>
-                  </div>
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginBottom:"14px" }}>
-                    <div><label style={S.label}>Frekvence</label>
-                      <select value={subForm.cycle} onChange={e => setSubForm(f => ({...f,cycle:e.target.value}))} style={{...S.input, cursor:"pointer"}}>
-                        {BILLING_CYCLES.map(c => <option key={c}>{c}</option>)}
-                      </select>
-                    </div>
-                    <div><label style={S.label}>Kategorie</label>
-                      <select value={subForm.category} onChange={e => setSubForm(f => ({...f,category:e.target.value}))} style={{...S.input, cursor:"pointer"}}>
-                        {SUB_CATEGORIES.map(c => <option key={c}>{c}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                  <div style={{ marginBottom:"20px", display:"flex", alignItems:"center", gap:"10px" }}>
-                    <div onClick={() => setSubForm(f => ({...f,active:!f.active}))} style={{ width:"36px", height:"20px", borderRadius:"10px", background:subForm.active?"#3730a3":"#1a1830", cursor:"pointer", position:"relative", border:"1px solid #2a2540" }}>
-                      <div style={{ position:"absolute", top:"2px", left:subForm.active?"16px":"2px", width:"14px", height:"14px", borderRadius:"50%", background:subForm.active?"#818cf8":"#4b4860", transition:"left .2s" }} />
-                    </div>
-                    <span style={{ fontSize:"12px", color:subForm.active?clr.win:clr.muted }}>{subForm.active?"Aktivni":"Neaktivni"}</span>
                   </div>
                   <div style={{ display:"flex", gap:"10px" }}>
                     <button onClick={() => setShowSubForm(false)} style={{...S.btnSecondary, flex:1}}>Zrusit</button>
@@ -431,8 +407,9 @@ export default function App() {
               <tbody>
                 {monthDays.map((date,i) => {
                   const r = records[date];
-                  const profit = r ? (r.revenue-r.ads) : null;
-                  const roas = r && r.ads>0 ? r.revenue/r.ads : null;
+                  const hasData = r && (r.sales>0 || r.ads>0);
+                  const profit = hasData ? (r.revenue-r.ads) : null;
+                  const roas = hasData && r.ads>0 ? r.revenue/r.ads : null;
                   const st = roasStatus(roas);
                   const isToday = date===todayStr;
                   return (
@@ -440,25 +417,25 @@ export default function App() {
                       onMouseEnter={e => e.currentTarget.style.background="#1e1c35"}
                       onMouseLeave={e => e.currentTarget.style.background=isToday?"#1a1535":i%2===0?"#12111e":"#111020"}>
                       <td style={{ padding:"9px 12px", color:isToday?"#c4b5fd":"#a09ab8" }}>{date.split("-")[2]}. {MONTHS[parseInt(date.split("-")[1])-1].substring(0,3)}.{isToday&&<span style={{ marginLeft:"6px", fontSize:"8px", background:"#3730a3", color:"#a5b4fc", padding:"1px 5px", borderRadius:"4px" }}>DNES</span>}</td>
-                      <td style={{ padding:"9px 12px", color:r?clr.lose:"#2a2540" }}>{r?fmt(r.ads):"-"}</td>
-                      <td style={{ padding:"9px 12px", color:r?"#e8e4d9":"#2a2540" }}>{r?r.sales:"-"}</td>
-                      <td style={{ padding:"9px 12px", color:r?clr.win:"#2a2540" }}>{r?fmt(r.revenue):"-"}</td>
+                      <td style={{ padding:"9px 12px", color:hasData?clr.lose:"#2a2540" }}>{hasData?fmt(r.ads):"-"}</td>
+                      <td style={{ padding:"9px 12px", color:hasData?"#e8e4d9":"#2a2540" }}>{hasData?r.sales:"-"}</td>
+                      <td style={{ padding:"9px 12px", color:hasData?clr.win:"#2a2540" }}>{hasData?fmt(r.revenue):"-"}</td>
                       <td style={{ padding:"9px 12px", color:profit!==null?(profit>=0?clr.purple:clr.lose):"#2a2540", fontWeight:profit!==null?"700":"400" }}>{profit!==null?fmt(profit):"-"}</td>
                       <td style={{ padding:"9px 12px", color:roas!==null?(roas>=WINNING_ROAS?clr.win:roas>=1?clr.eq:clr.lose):"#2a2540", fontWeight:"600" }}>{roas!==null?roas.toFixed(2)+"x":"-"}</td>
-                      <td style={{ padding:"9px 12px" }}>{st ? <Badge status={st} /> : null}</td>
+                      <td style={{ padding:"9px 12px" }}>{st?<Badge status={st}/>:null}</td>
                     </tr>
                   );
                 })}
               </tbody>
               <tfoot>
                 <tr style={{ background:"#1a1830", borderTop:"2px solid #2a2540" }}>
-                  <td style={{ padding:"12px", fontSize:"9px", color:"#6b5fa0", letterSpacing:"2px", textTransform:"uppercase" }}>SOUCET</td>
+                  <td style={{ padding:"12px", fontSize:"9px", color:"#6b5fa0", textTransform:"uppercase" }}>SOUCET</td>
                   <td style={{ padding:"12px", color:clr.lose, fontWeight:"700" }}>{fmt(stats.ads)}</td>
                   <td style={{ padding:"12px", color:"#e8e4d9", fontWeight:"700" }}>{fmt(stats.sales)}</td>
                   <td style={{ padding:"12px", color:clr.win, fontWeight:"700" }}>{fmt(stats.revenue)}</td>
                   <td style={{ padding:"12px", color:stats.profit>=0?clr.purple:clr.lose, fontWeight:"700" }}>{fmt(stats.profit)}</td>
                   <td style={{ padding:"12px", color:clr.eq, fontWeight:"700" }}>{stats.roas.toFixed(2)}x</td>
-                  <td style={{ padding:"12px" }}><Badge status={roasStatus(stats.roas)} /></td>
+                  <td style={{ padding:"12px" }}><Badge status={roasStatus(stats.roas)}/></td>
                 </tr>
               </tfoot>
             </table>
@@ -468,38 +445,34 @@ export default function App() {
         {tab==="entry" && (
           <div style={{ maxWidth:"460px" }}>
             <div style={{ background:"#12111e", border:"1px solid #2a2540", borderRadius:"12px", padding:"24px" }}>
-              <div style={{ fontSize:"11px", color:"#6b5fa0", letterSpacing:"3px", textTransform:"uppercase", marginBottom:"20px" }}>Zapis dne</div>
-              <div style={{ marginBottom:"14px" }}><label style={S.label}>Datum</label><input type="date" value={editDate} onChange={e => { setEditDate(e.target.value); const r=records[e.target.value]; setForm(r?{ads:String(r.ads),sales:String(r.sales),revenue:String(r.revenue)}:{ads:"",sales:"",revenue:""}); }} style={S.input} /></div>
-              <div style={{ marginBottom:"14px", padding:"10px", background:"#0f0e1a", borderRadius:"8px", fontSize:"11px", color:"#6b5fa0" }}>Trzby a objednavky se nacitaji automaticky ze Shopify. Zde zadej pouze reklamu.</div>
-              {[["ads","Utrata za reklamu (Kc)","1200"]].map(([k,lbl,ph]) => (
-                <div key={k} style={{ marginBottom:"14px" }}><label style={S.label}>{lbl}</label><input type="number" placeholder={"napr. "+ph} value={form[k]} onChange={e => setForm(f => ({...f,[k]:e.target.value}))} style={S.input} /></div>
-              ))}
+              <div style={{ fontSize:"11px", color:"#6b5fa0", letterSpacing:"3px", textTransform:"uppercase", marginBottom:"20px" }}>Zapis reklamy</div>
+              <div style={{ marginBottom:"14px", padding:"10px", background:"#0f0e1a", borderRadius:"8px", fontSize:"11px", color:"#6b5fa0" }}>
+                Trzby a objednavky se nacitaji automaticky ze Shopify. Zadej pouze utrata za reklamu.
+              </div>
+              <div style={{ marginBottom:"14px" }}><label style={S.label}>Datum</label><input type="date" value={editDate} onChange={e => { setEditDate(e.target.value); const r=adsData[e.target.value]; setForm({ads:r?String(r.ads):""}); }} style={S.input} /></div>
+              <div style={{ marginBottom:"14px" }}><label style={S.label}>Utrata za reklamu (Kc)</label><input type="number" placeholder="napr. 1200" value={form.ads} onChange={e => setForm(f => ({...f,ads:e.target.value}))} style={S.input} /></div>
               {form.ads && (() => {
-                const a=parseFloat(form.ads)||0;
-                const r=records[editDate];
-                const revenue=r?r.revenue:0;
-                const roas=a>0?revenue/a:null;
-                const profit=revenue-a;
-                const st=roasStatus(roas);
+                const a = parseFloat(form.ads)||0;
+                const r = records[editDate];
+                const revenue = r?r.revenue:0;
+                const roas = a>0?revenue/a:null;
+                const profit = revenue-a;
+                const st = roasStatus(roas);
                 return (
                   <div style={{ background:"#0f0e1a", border:"1px solid #2a2540", borderRadius:"8px", padding:"14px", marginBottom:"18px" }}>
                     <div style={{ fontSize:"10px", color:"#6b5fa0", letterSpacing:"2px", marginBottom:"10px" }}>AUTOMATICKY VYPOCET</div>
-                    {[
-                      ["Zisk", fmtK(profit), profit>=0?clr.purple:clr.lose],
-                      ["ROAS", roas?roas.toFixed(2)+"x":"-", roas>=WINNING_ROAS?clr.win:roas>=1?clr.eq:clr.lose],
-                      ["ROI", a>0?((profit/a)*100).toFixed(1)+"%":"-", "#fbbf24"],
-                    ].map(([label,val,color]) => (
+                    {[["Zisk",fmtK(profit),profit>=0?clr.purple:clr.lose],["ROAS",roas?roas.toFixed(2)+"x":"-",roas>=WINNING_ROAS?clr.win:roas>=1?clr.eq:clr.lose],["ROI",a>0?((profit/a)*100).toFixed(1)+"%":"-","#fbbf24"]].map(([label,val,color]) => (
                       <div key={label} style={{ display:"flex", justifyContent:"space-between", marginBottom:"6px" }}>
                         <span style={{ fontSize:"11px", color:clr.muted }}>{label}</span>
                         <span style={{ fontSize:"13px", fontWeight:"700", color }}>{val}</span>
                       </div>
                     ))}
-                    {st && <div style={{ marginTop:"10px" }}><Badge status={st} /></div>}
+                    {st && <div style={{ marginTop:"10px" }}><Badge status={st}/></div>}
                   </div>
                 );
               })()}
-              <button onClick={handleSave} style={{ width:"100%", padding:"14px", background:saved?"linear-gradient(135deg,#065f46,#047857)":"linear-gradient(135deg,#3730a3,#4f46e5)", border:"none", borderRadius:"8px", color:"#fff", fontSize:"14px", fontWeight:"700", cursor:"pointer", fontFamily:"monospace", letterSpacing:"1px", transition:"all .3s" }}>
-                {saved ? "Ulozeno!" : "Ulozit reklamu"}
+              <button onClick={handleSave} style={{ width:"100%", padding:"14px", background:saved?"linear-gradient(135deg,#065f46,#047857)":"linear-gradient(135deg,#3730a3,#4f46e5)", border:"none", borderRadius:"8px", color:"#fff", fontSize:"14px", fontWeight:"700", cursor:"pointer", fontFamily:"monospace", transition:"all .3s" }}>
+                {saved?"Ulozeno!":"Ulozit reklamu"}
               </button>
             </div>
           </div>
