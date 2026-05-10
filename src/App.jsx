@@ -45,34 +45,21 @@ const INIT_PRODUCTS = [
   { id:3, name:"Produkt C", color:"#f87171" },
 ];
 
-const BILLING_CYCLES = ["Mesicne","Rocne","Ctvrtletne","Jednorzove"].map(s => s.replace(/[^\x00-\x7F]/g, ""));
 const SUB_CATEGORIES = ["E-commerce","Reklama","Design","Analytics","Logistika","Komunikace","Ostatni"];
+const BILLING_CYCLES = ["Mesicne","Rocne","Ctvrtletne","Jednorzove"].map(s => s.replace(/[^\x00-\x7F]/g,""));
 const INIT_SUBS = [
   { id:1, name:"Shopify", category:"E-commerce", price:1800, currency:"CZK", cycle:"Mesicne", active:true, note:"Prostredni plan", color:"#34d399" },
   { id:2, name:"Meta Ads", category:"Reklama", price:0, currency:"CZK", cycle:"Mesicne", active:true, note:"Variabilni", color:"#818cf8" },
   { id:3, name:"Canva Pro", category:"Design", price:300, currency:"CZK", cycle:"Mesicne", active:true, note:"Grafika", color:"#f472b6" },
 ];
 
-function parseOrders(json, month, year) {
-  const records = {};
-  try {
-    const edges = json.orders?.edges || [];
-    edges.forEach(({ node }) => {
-      const date = node.createdAt.split("T")[0];
-      const d = new Date(date);
-      if (d.getMonth() !== month || d.getFullYear() !== year) return;
-      if (!records[date]) records[date] = { ads:0, sales:0, revenue:0 };
-      records[date].sales += 1;
-      records[date].revenue += Math.round(parseFloat(node.totalPrice)||0);
-    });
-  } catch(e) {}
-  return records;
-}
-
 export default function App() {
   const [tab, setTab] = useState("overview");
-  const [shopifyData, setShopifyData] = useState(null);
+  const [shopifyRecords, setShopifyRecords] = useState({});
   const [adsData, setAdsData] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [shopifyOk, setShopifyOk] = useState(false);
+  const [shopifyErr, setShopifyErr] = useState(null);
   const [products, setProducts] = useState(INIT_PRODUCTS);
   const [pData, setPData] = useState({1:{},2:{},3:{}});
   const [selMonth, setSelMonth] = useState(today.getMonth());
@@ -88,26 +75,35 @@ export default function App() {
   const [subForm, setSubForm] = useState({ name:"", category:"E-commerce", price:"", currency:"CZK", cycle:"Mesicne", active:true, note:"", color:"#818cf8" });
 
   useEffect(() => {
-    fetch("/orders.json")
+    setLoading(true);
+    setShopifyOk(false);
+    setShopifyErr(null);
+    const from = selYear + "-" + String(selMonth+1).padStart(2,"0") + "-01T00:00:00Z";
+    const lastDay = new Date(selYear, selMonth+1, 0).getDate();
+    const to = selYear + "-" + String(selMonth+1).padStart(2,"0") + "-" + String(lastDay).padStart(2,"0") + "T23:59:59Z";
+    fetch("/api/shopify?from=" + from + "&to=" + to)
       .then(r => r.json())
-      .then(data => setShopifyData(data))
-      .catch(() => {});
-  }, []);
+      .then(data => {
+        if (data.error) throw new Error(data.error);
+        setShopifyRecords(data);
+        setShopifyOk(true);
+      })
+      .catch(e => setShopifyErr(e.message))
+      .finally(() => setLoading(false));
+  }, [selMonth, selYear]);
 
   const records = useMemo(() => {
-    if (!shopifyData) return adsData;
-    const shopify = parseOrders(shopifyData, selMonth, selYear);
     const merged = {};
-    const allDates = new Set([...Object.keys(shopify), ...Object.keys(adsData)]);
+    const allDates = new Set([...Object.keys(shopifyRecords), ...Object.keys(adsData)]);
     allDates.forEach(date => {
       merged[date] = {
         ads: adsData[date]?.ads || 0,
-        sales: shopify[date]?.sales || 0,
-        revenue: shopify[date]?.revenue || 0,
+        sales: shopifyRecords[date]?.sales || 0,
+        revenue: shopifyRecords[date]?.revenue || 0,
       };
     });
     return merged;
-  }, [shopifyData, adsData, selMonth, selYear]);
+  }, [shopifyRecords, adsData]);
 
   const monthDays = useMemo(() => {
     const n = new Date(selYear, selMonth+1, 0).getDate();
@@ -162,7 +158,7 @@ export default function App() {
 
   function handleSave() {
     const ads = parseFloat(form.ads)||0;
-    setAdsData(prev => ({ ...prev, [editDate]: { ads, sales: records[editDate]?.sales||0, revenue: records[editDate]?.revenue||0 }}));
+    setAdsData(prev => ({ ...prev, [editDate]: { ads }}));
     setSaved(true); setTimeout(() => setSaved(false), 2000);
     setForm({ ads:"" });
   }
@@ -237,8 +233,9 @@ export default function App() {
         </div>
       </div>
 
-      {shopifyData && <div style={{ background:"#052e16", padding:"6px 24px", fontSize:"11px", color:"#34d399" }}>Shopify data nactena!</div>}
-      {!shopifyData && <div style={{ background:"#1a1535", padding:"6px 24px", fontSize:"11px", color:"#a5b4fc" }}>Nacitam Shopify data...</div>}
+      {loading && <div style={{ background:"#1a1535", padding:"6px 24px", fontSize:"11px", color:"#a5b4fc" }}>Nacitam data ze Shopify...</div>}
+      {shopifyOk && !loading && <div style={{ background:"#052e16", padding:"6px 24px", fontSize:"11px", color:"#34d399" }}>Shopify data nactena automaticky!</div>}
+      {shopifyErr && <div style={{ background:"#1f0606", padding:"6px 24px", fontSize:"11px", color:"#f87171" }}>Chyba: {shopifyErr}</div>}
 
       <div style={S.tabBar}>
         {TABS.map(([id,label]) => (
@@ -256,7 +253,7 @@ export default function App() {
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:"12px", marginBottom:"24px" }}>
               <KpiCard label="Utrata reklama" value={fmtK(stats.ads)} icon="$" color={clr.lose} sub={stats.days + " dni"} />
-              <KpiCard label="Trzby (Shopify)" value={fmtK(stats.revenue)} icon="+" color={clr.win} sub={fmt(stats.sales) + " obj."} />
+              <KpiCard label="Trzby Shopify" value={fmtK(stats.revenue)} icon="+" color={clr.win} sub={fmt(stats.sales) + " obj."} />
               <KpiCard label="Cisty zisk" value={fmtK(stats.profit)} icon="=" color={stats.profit>=0?clr.purple:clr.lose} sub={stats.profit>=0?"V zisku":"Ztrata"} />
               <KpiCard label="ROAS" value={stats.roas.toFixed(2)+"x"} icon="%" color={clr.eq} sub={"ROI " + stats.roi.toFixed(1) + "%"} />
             </div>
@@ -357,6 +354,7 @@ export default function App() {
                       <span style={{ fontSize:"9px", color:s.active?clr.win:clr.muted }}>{s.active?"Aktivni":"Neaktivni"}</span>
                     </div>
                     {s.note && <div style={{ fontSize:"11px", color:"#4b4860" }}>{s.note}</div>}
+                    <div style={{ fontSize:"11px", color:clr.muted }}>{s.cycle}</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
                     <div style={{ fontSize:"18px", fontWeight:"700", color:"#fb923c" }}>{fmtK(s.price)}</div>
@@ -447,7 +445,7 @@ export default function App() {
             <div style={{ background:"#12111e", border:"1px solid #2a2540", borderRadius:"12px", padding:"24px" }}>
               <div style={{ fontSize:"11px", color:"#6b5fa0", letterSpacing:"3px", textTransform:"uppercase", marginBottom:"20px" }}>Zapis reklamy</div>
               <div style={{ marginBottom:"14px", padding:"10px", background:"#0f0e1a", borderRadius:"8px", fontSize:"11px", color:"#6b5fa0" }}>
-                Trzby a objednavky se nacitaji automaticky ze Shopify. Zadej pouze utrata za reklamu.
+                Trzby se nacitaji automaticky ze Shopify. Zadej pouze denni utrata za reklamu (Meta Ads).
               </div>
               <div style={{ marginBottom:"14px" }}><label style={S.label}>Datum</label><input type="date" value={editDate} onChange={e => { setEditDate(e.target.value); const r=adsData[e.target.value]; setForm({ads:r?String(r.ads):""}); }} style={S.input} /></div>
               <div style={{ marginBottom:"14px" }}><label style={S.label}>Utrata za reklamu (Kc)</label><input type="number" placeholder="napr. 1200" value={form.ads} onChange={e => setForm(f => ({...f,ads:e.target.value}))} style={S.input} /></div>
@@ -461,7 +459,7 @@ export default function App() {
                 return (
                   <div style={{ background:"#0f0e1a", border:"1px solid #2a2540", borderRadius:"8px", padding:"14px", marginBottom:"18px" }}>
                     <div style={{ fontSize:"10px", color:"#6b5fa0", letterSpacing:"2px", marginBottom:"10px" }}>AUTOMATICKY VYPOCET</div>
-                    {[["Zisk",fmtK(profit),profit>=0?clr.purple:clr.lose],["ROAS",roas?roas.toFixed(2)+"x":"-",roas>=WINNING_ROAS?clr.win:roas>=1?clr.eq:clr.lose],["ROI",a>0?((profit/a)*100).toFixed(1)+"%":"-","#fbbf24"]].map(([label,val,color]) => (
+                    {[["Zisk",fmtK(profit),profit>=0?clr.purple:clr.lose],["ROAS",roas?roas.toFixed(2)+"x":"-",roas&&roas>=WINNING_ROAS?clr.win:roas&&roas>=1?clr.eq:clr.lose],["ROI",a>0?((profit/a)*100).toFixed(1)+"%":"-","#fbbf24"]].map(([label,val,color]) => (
                       <div key={label} style={{ display:"flex", justifyContent:"space-between", marginBottom:"6px" }}>
                         <span style={{ fontSize:"11px", color:clr.muted }}>{label}</span>
                         <span style={{ fontSize:"13px", fontWeight:"700", color }}>{val}</span>
