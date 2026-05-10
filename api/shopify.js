@@ -15,7 +15,7 @@ export default async function handler(req, res) {
       const date = order.created_at.split("T")[0];
       if (!byDay[date]) byDay[date] = { sales: 0, revenue: 0 };
       byDay[date].sales += 1;
-      byDay[date].revenue += Math.round(parseFloat(order.total_price || 0));
+     byDay[date].revenue += Math.round(parseFloat(order.total_price || 0) * 3.3);
     });
     res.status(200).json(byDay);
   } catch (err) {
