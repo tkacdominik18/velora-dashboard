@@ -86,13 +86,16 @@ export default function App() {
       .catch(e => setMetaErr(e.message));
   }, [selMonth, selYear, allTime]);
 
- // Fetch Meta Campaigns - vzdy cela doba od zacatku
+ // Fetch Meta Campaigns
   useEffect(() => {
-    fetch("/api/meta-campaigns?from=2026-01-01&to=" + todayStr)
+    const params = allTime
+      ? "?from=2026-03-20&to=" + todayStr
+      : "?from=" + selYear + "-" + String(selMonth+1).padStart(2,"0") + "-01&to=" + selYear + "-" + String(selMonth+1).padStart(2,"0") + "-" + String(new Date(selYear, selMonth+1, 0).getDate()).padStart(2,"0");
+    fetch("/api/meta-campaigns" + params)
       .then(r => r.json())
       .then(data => { if (!data.error) setMetaCampaigns(data); })
       .catch(() => {});
-  }, []);
+  }, [selMonth, selYear, allTime]);
 
   const records = useMemo(() => {
     const merged = {};
