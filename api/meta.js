@@ -3,7 +3,6 @@ export default async function handler(req, res) {
   const adAccountId = "1405336980918594";
 
   try {
-    // Podporuje ?from=YYYY-MM-DD&to=YYYY-MM-DD nebo pouzije aktualni mesic
     let from, to;
     if (req.query.from && req.query.to) {
       from = req.query.from;
@@ -15,23 +14,34 @@ export default async function handler(req, res) {
     }
 
     const timeRange = JSON.stringify({ since: from, until: to });
-    const url = "https://graph.facebook.com/v19.0/act_" + adAccountId + "/insights?fields=spend,date_start&time_increment=1&time_range=" + encodeURIComponent(timeRange) + "&access_token=" + token;
-
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (data.error) {
-      return res.status(400).json({ error: data.error.message });
-    }
-
     const byDay = {};
-    const records = data.data || [];
-    records.forEach(record => {
-      const date = record.date_start;
-      byDay[date] = {
-        spend: Math.round(parseFloat(record.spend || 0) * 22.5)
-      };
-    });
+
+    // Zacni s prvni stranou
+    let nextUrl = "https://graph.facebook.com/v19.0/act_" + adAccountId + "/insights"
+      + "?fields=spend,date_start"
+      + "&time_increment=1"
+      + "&limit=100"
+      + "&time_range=" + encodeURIComponent(timeRange)
+      + "&access_token=" + token;
+
+    // Stankuj dokud neni vse nacteno
+    while (nextUrl) {
+      const response = await fetch(nextUrl);
+      const data = await response.json();
+
+      if (data.error) {
+        return res.status(400).json({ error: data.error.message });
+      }
+
+      (data.data || []).forEach(record => {
+        byDay[record.date_start] = {
+          spend: Math.round(parseFloat(record.spend || 0) * 22.5)
+        };
+      });
+
+      // Pokud Meta vrati dalsi stranku, pokracuj - jinak skonci
+      nextUrl = data.paging?.next || null;
+    }
 
     res.status(200).json(byDay);
   } catch (err) {
