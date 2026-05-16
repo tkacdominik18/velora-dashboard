@@ -3,11 +3,19 @@ export default async function handler(req, res) {
   const adAccountId = "1405336980918594";
 
   try {
-    const now = new Date();
-    const from = now.getFullYear() + "-" + String(now.getMonth()+1).padStart(2,"0") + "-01";
-    const to = now.getFullYear() + "-" + String(now.getMonth()+1).padStart(2,"0") + "-" + String(new Date(now.getFullYear(), now.getMonth()+1, 0).getDate()).padStart(2,"0");
+    // Podporuje ?from=YYYY-MM-DD&to=YYYY-MM-DD nebo pouzije aktualni mesic
+    let from, to;
+    if (req.query.from && req.query.to) {
+      from = req.query.from;
+      to = req.query.to;
+    } else {
+      const now = new Date();
+      from = now.getFullYear() + "-" + String(now.getMonth()+1).padStart(2,"0") + "-01";
+      to = now.getFullYear() + "-" + String(now.getMonth()+1).padStart(2,"0") + "-" + String(new Date(now.getFullYear(), now.getMonth()+1, 0).getDate()).padStart(2,"0");
+    }
 
-    const url = "https://graph.facebook.com/v19.0/act_" + adAccountId + "/insights?fields=spend,date_start&time_increment=1&time_range={\"since\":\"" + from + "\",\"until\":\"" + to + "\"}&access_token=" + token;
+    const timeRange = JSON.stringify({ since: from, until: to });
+    const url = "https://graph.facebook.com/v19.0/act_" + adAccountId + "/insights?fields=spend,date_start&time_increment=1&time_range=" + encodeURIComponent(timeRange) + "&access_token=" + token;
 
     const response = await fetch(url);
     const data = await response.json();
