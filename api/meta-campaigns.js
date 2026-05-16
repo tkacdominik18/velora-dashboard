@@ -83,7 +83,11 @@ export default async function handler(req, res) {
       daily_budget: campaignMeta[item.id]?.daily_budget || null,
     }));
 
-    campaigns.sort((a, b) => b.spend - a.spend);
+campaigns.sort((a, b) => {
+  const numA = parseInt(a.name.match(/\d+/) || [0]);
+  const numB = parseInt(b.name.match(/\d+/) || [0]);
+  return numB - numA;
+});
 
     res.status(200).json(campaigns);
   } catch (err) {
