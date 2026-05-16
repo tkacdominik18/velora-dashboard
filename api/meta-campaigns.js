@@ -14,16 +14,14 @@ export default async function handler(req, res) {
     }
 
     const timeRange = JSON.stringify({ since: from, until: to });
+    const insightsByCampaign = {};
 
-    // Nacti insights pro vsechny kampane se stankovanim
     let insightsNext = "https://graph.facebook.com/v19.0/act_" + adAccountId + "/insights"
       + "?fields=campaign_id,campaign_name,spend,actions,action_values"
       + "&level=campaign"
       + "&limit=100"
       + "&time_range=" + encodeURIComponent(timeRange)
       + "&access_token=" + token;
-
-    const insightsByCampaign = {};
 
     while (insightsNext) {
       const insightsRes = await fetch(insightsNext);
@@ -59,13 +57,11 @@ export default async function handler(req, res) {
       insightsNext = insightsData.paging?.next || null;
     }
 
-    // Nacti status a budget kampani
+    const campaignMeta = {};
     let campaignsNext = "https://graph.facebook.com/v19.0/act_" + adAccountId + "/campaigns"
       + "?fields=id,name,status,daily_budget,lifetime_budget"
       + "&limit=100"
       + "&access_token=" + token;
-
-    const campaignMeta = {};
 
     while (campaignsNext) {
       const campaignsRes = await fetch(campaignsNext);
@@ -81,14 +77,12 @@ export default async function handler(req, res) {
       campaignsNext = campaignsData.paging?.next || null;
     }
 
-    // Spoj vse dohromady
-    const campaigns = Object.values(insightsBycampaign).map(item => ({
+    const campaigns = Object.values(insightsByCampaign).map(item => ({
       ...item,
       status: campaignMeta[item.id]?.status || "UNKNOWN",
       daily_budget: campaignMeta[item.id]?.daily_budget || null,
     }));
 
-    // Serad podle utracene castky
     campaigns.sort((a, b) => b.spend - a.spend);
 
     res.status(200).json(campaigns);
