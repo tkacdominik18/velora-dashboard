@@ -56,17 +56,16 @@ const INIT_SUBS = [
 export default function App() {
   const [tab, setTab] = useState("overview");
   const [shopifyRecords, setShopifyRecords] = useState({});
-  const [adsData, setAdsData] = useState({});
-  const [loading, setLoading] = useState(false);
+  const [metaRecords, setMetaRecords] = useState({});
   const [shopifyOk, setShopifyOk] = useState(false);
+  const [metaOk, setMetaOk] = useState(false);
   const [shopifyErr, setShopifyErr] = useState(null);
+  const [metaErr, setMetaErr] = useState(null);
   const [products, setProducts] = useState(INIT_PRODUCTS);
   const [pData, setPData] = useState({1:{},2:{},3:{}});
   const [selMonth, setSelMonth] = useState(today.getMonth());
   const [selYear] = useState(today.getFullYear());
   const [editDate, setEditDate] = useState(todayStr);
-  const [form, setForm] = useState({ ads:"" });
-  const [saved, setSaved] = useState(false);
   const [newProd, setNewProd] = useState("");
   const [editProd, setEditProd] = useState(null);
   const [subs, setSubs] = useState(INIT_SUBS);
@@ -75,35 +74,35 @@ export default function App() {
   const [subForm, setSubForm] = useState({ name:"", category:"E-commerce", price:"", currency:"CZK", cycle:"Mesicne", active:true, note:"", color:"#818cf8" });
 
   useEffect(() => {
-    setLoading(true);
     setShopifyOk(false);
     setShopifyErr(null);
-    const from = selYear + "-" + String(selMonth+1).padStart(2,"0") + "-01T00:00:00Z";
-    const lastDay = new Date(selYear, selMonth+1, 0).getDate();
-    const to = selYear + "-" + String(selMonth+1).padStart(2,"0") + "-" + String(lastDay).padStart(2,"0") + "T23:59:59Z";
-    fetch("/api/shopify?from=" + from + "&to=" + to)
+    fetch("/api/shopify")
       .then(r => r.json())
-      .then(data => {
-        if (data.error) throw new Error(data.error);
-        setShopifyRecords(data);
-        setShopifyOk(true);
-      })
-      .catch(e => setShopifyErr(e.message))
-      .finally(() => setLoading(false));
+      .then(data => { if (data.error) throw new Error(data.error); setShopifyRecords(data); setShopifyOk(true); })
+      .catch(e => setShopifyErr(e.message));
+  }, [selMonth, selYear]);
+
+  useEffect(() => {
+    setMetaOk(false);
+    setMetaErr(null);
+    fetch("/api/meta")
+      .then(r => r.json())
+      .then(data => { if (data.error) throw new Error(data.error); setMetaRecords(data); setMetaOk(true); })
+      .catch(e => setMetaErr(e.message));
   }, [selMonth, selYear]);
 
   const records = useMemo(() => {
     const merged = {};
-    const allDates = new Set([...Object.keys(shopifyRecords), ...Object.keys(adsData)]);
+    const allDates = new Set([...Object.keys(shopifyRecords), ...Object.keys(metaRecords)]);
     allDates.forEach(date => {
       merged[date] = {
-        ads: adsData[date]?.ads || 0,
+        ads: metaRecords[date]?.spend || 0,
         sales: shopifyRecords[date]?.sales || 0,
         revenue: shopifyRecords[date]?.revenue || 0,
       };
     });
     return merged;
-  }, [shopifyRecords, adsData]);
+  }, [shopifyRecords, metaRecords]);
 
   const monthDays = useMemo(() => {
     const n = new Date(selYear, selMonth+1, 0).getDate();
@@ -156,19 +155,7 @@ export default function App() {
     return { monthlyTotal, yearlyTotal: monthlyTotal*12, active: active.length };
   }, [subs]);
 
-  function handleSave() {
-    const ads = parseFloat(form.ads)||0;
-    setAdsData(prev => ({ ...prev, [editDate]: { ads }}));
-    setSaved(true); setTimeout(() => setSaved(false), 2000);
-    setForm({ ads:"" });
-  }
-
-  function loadDay(date) {
-    setEditDate(date);
-    const r = adsData[date];
-    setForm({ ads: r ? String(r.ads) : "" });
-    setTab("entry");
-  }
+  function loadDay(date) { setEditDate(date); setTab("entry"); }
 
   function addProduct() {
     if (!newProd.trim()) return;
@@ -202,7 +189,7 @@ export default function App() {
   function deleteSub(id) { setSubs(prev => prev.filter(s => s.id !== id)); }
   function toggleSub(id) { setSubs(prev => prev.map(s => s.id===id ? {...s, active:!s.active} : s)); }
 
-  const TABS = [["overview","Prehled"],["products","Produkty"],["subs","Predplatne"],["table","Tabulka"],["entry","Zapis reklamy"]];
+  const TABS = [["overview","Prehled"],["products","Produkty"],["subs","Predplatne"],["table","Tabulka"]];
 
   const S = {
     page: { minHeight:"100vh", background:"#0a0a0f", fontFamily:"monospace", color:"#e8e4d9" },
@@ -233,9 +220,12 @@ export default function App() {
         </div>
       </div>
 
-      {loading && <div style={{ background:"#1a1535", padding:"6px 24px", fontSize:"11px", color:"#a5b4fc" }}>Nacitam data ze Shopify...</div>}
-      {shopifyOk && !loading && <div style={{ background:"#052e16", padding:"6px 24px", fontSize:"11px", color:"#34d399" }}>Shopify data nactena automaticky!</div>}
-      {shopifyErr && <div style={{ background:"#1f0606", padding:"6px 24px", fontSize:"11px", color:"#f87171" }}>Chyba: {shopifyErr}</div>}
+      <div style={{ display:"flex", gap:"0" }}>
+        {shopifyOk && <div style={{ background:"#052e16", padding:"6px 16px", fontSize:"11px", color:"#34d399", flex:1 }}>Shopify OK</div>}
+        {shopifyErr && <div style={{ background:"#1f0606", padding:"6px 16px", fontSize:"11px", color:"#f87171", flex:1 }}>Shopify: {shopifyErr}</div>}
+        {metaOk && <div style={{ background:"#0c1a3a", padding:"6px 16px", fontSize:"11px", color:"#60a5fa", flex:1 }}>Meta Ads OK</div>}
+        {metaErr && <div style={{ background:"#1f0606", padding:"6px 16px", fontSize:"11px", color:"#f87171", flex:1 }}>Meta: {metaErr}</div>}
+      </div>
 
       <div style={S.tabBar}>
         {TABS.map(([id,label]) => (
@@ -252,7 +242,7 @@ export default function App() {
               <span style={{ fontSize:"12px", color:clr.muted }}>ROAS: <strong style={{ color:"#fbbf24" }}>{stats.roas.toFixed(2)}x</strong> (winning &gt;= {WINNING_ROAS}x)</span>
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:"12px", marginBottom:"24px" }}>
-              <KpiCard label="Utrata reklama" value={fmtK(stats.ads)} icon="$" color={clr.lose} sub={stats.days + " dni"} />
+              <KpiCard label="Meta Ads utrata" value={fmtK(stats.ads)} icon="$" color={clr.lose} sub={stats.days + " dni"} />
               <KpiCard label="Trzby Shopify" value={fmtK(stats.revenue)} icon="+" color={clr.win} sub={fmt(stats.sales) + " obj."} />
               <KpiCard label="Cisty zisk" value={fmtK(stats.profit)} icon="=" color={stats.profit>=0?clr.purple:clr.lose} sub={stats.profit>=0?"V zisku":"Ztrata"} />
               <KpiCard label="ROAS" value={stats.roas.toFixed(2)+"x"} icon="%" color={clr.eq} sub={"ROI " + stats.roi.toFixed(1) + "%"} />
@@ -270,8 +260,8 @@ export default function App() {
                 ))}
               </div>
               <div style={{ display:"flex", gap:"16px", marginTop:"10px", fontSize:"10px", color:clr.muted }}>
-                <span style={{ color:clr.win }}>* Trzby</span>
-                <span style={{ color:clr.lose }}>* Reklama</span>
+                <span style={{ color:clr.win }}>* Trzby (Shopify)</span>
+                <span style={{ color:clr.lose }}>* Reklama (Meta)</span>
               </div>
             </div>
           </div>
@@ -397,7 +387,7 @@ export default function App() {
             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px", minWidth:"580px" }}>
               <thead>
                 <tr style={{ background:"#1a1830", borderBottom:"1px solid #2a2540" }}>
-                  {["Datum","Reklama","Obj.","Trzby","Zisk","ROAS","Status"].map(h => (
+                  {["Datum","Meta Ads","Obj.","Trzby","Zisk","ROAS","Status"].map(h => (
                     <th key={h} style={{ padding:"12px", textAlign:"left", fontSize:"9px", color:"#6b5fa0", letterSpacing:"2px", textTransform:"uppercase", fontWeight:"600" }}>{h}</th>
                   ))}
                 </tr>
@@ -437,42 +427,6 @@ export default function App() {
                 </tr>
               </tfoot>
             </table>
-          </div>
-        )}
-
-        {tab==="entry" && (
-          <div style={{ maxWidth:"460px" }}>
-            <div style={{ background:"#12111e", border:"1px solid #2a2540", borderRadius:"12px", padding:"24px" }}>
-              <div style={{ fontSize:"11px", color:"#6b5fa0", letterSpacing:"3px", textTransform:"uppercase", marginBottom:"20px" }}>Zapis reklamy</div>
-              <div style={{ marginBottom:"14px", padding:"10px", background:"#0f0e1a", borderRadius:"8px", fontSize:"11px", color:"#6b5fa0" }}>
-                Trzby se nacitaji automaticky ze Shopify. Zadej pouze denni utrata za reklamu (Meta Ads).
-              </div>
-              <div style={{ marginBottom:"14px" }}><label style={S.label}>Datum</label><input type="date" value={editDate} onChange={e => { setEditDate(e.target.value); const r=adsData[e.target.value]; setForm({ads:r?String(r.ads):""}); }} style={S.input} /></div>
-              <div style={{ marginBottom:"14px" }}><label style={S.label}>Utrata za reklamu (Kc)</label><input type="number" placeholder="napr. 1200" value={form.ads} onChange={e => setForm(f => ({...f,ads:e.target.value}))} style={S.input} /></div>
-              {form.ads && (() => {
-                const a = parseFloat(form.ads)||0;
-                const r = records[editDate];
-                const revenue = r?r.revenue:0;
-                const roas = a>0?revenue/a:null;
-                const profit = revenue-a;
-                const st = roasStatus(roas);
-                return (
-                  <div style={{ background:"#0f0e1a", border:"1px solid #2a2540", borderRadius:"8px", padding:"14px", marginBottom:"18px" }}>
-                    <div style={{ fontSize:"10px", color:"#6b5fa0", letterSpacing:"2px", marginBottom:"10px" }}>AUTOMATICKY VYPOCET</div>
-                    {[["Zisk",fmtK(profit),profit>=0?clr.purple:clr.lose],["ROAS",roas?roas.toFixed(2)+"x":"-",roas&&roas>=WINNING_ROAS?clr.win:roas&&roas>=1?clr.eq:clr.lose],["ROI",a>0?((profit/a)*100).toFixed(1)+"%":"-","#fbbf24"]].map(([label,val,color]) => (
-                      <div key={label} style={{ display:"flex", justifyContent:"space-between", marginBottom:"6px" }}>
-                        <span style={{ fontSize:"11px", color:clr.muted }}>{label}</span>
-                        <span style={{ fontSize:"13px", fontWeight:"700", color }}>{val}</span>
-                      </div>
-                    ))}
-                    {st && <div style={{ marginTop:"10px" }}><Badge status={st}/></div>}
-                  </div>
-                );
-              })()}
-              <button onClick={handleSave} style={{ width:"100%", padding:"14px", background:saved?"linear-gradient(135deg,#065f46,#047857)":"linear-gradient(135deg,#3730a3,#4f46e5)", border:"none", borderRadius:"8px", color:"#fff", fontSize:"14px", fontWeight:"700", cursor:"pointer", fontFamily:"monospace", transition:"all .3s" }}>
-                {saved?"Ulozeno!":"Ulozit reklamu"}
-              </button>
-            </div>
           </div>
         )}
 
